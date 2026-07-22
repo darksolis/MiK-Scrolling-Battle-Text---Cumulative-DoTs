@@ -1,6 +1,6 @@
 ## Interface: 30300
 ## Title: MSBT [|cffffff80Options|r]
-## Version: 5.4.86-Darksolis
+## Version: 5.4.88-Darksolis
 ## Author: Mikord
 ## Notes: Load on demand options for Mik's Scrolling Battle Text
 ## Dependencies: MikScrollingBattleText

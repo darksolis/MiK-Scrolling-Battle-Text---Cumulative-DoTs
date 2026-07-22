@@ -1,5 +1,5 @@
 ## Interface: 30300
-## Version: 5.4.86-Darksolis
+## Version: 5.4.88-Darksolis
 ## Title: Mik's Scrolling Battle Text
 ## Author: Mikord
 ## Notes: Scrolls battle information around the character model.

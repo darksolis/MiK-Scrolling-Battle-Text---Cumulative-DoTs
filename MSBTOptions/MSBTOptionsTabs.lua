@@ -3389,7 +3389,7 @@ tabFrames.skillIcons = tabFrame
 MSBTOptMain.AddTab(tabFrame, objLocale.label, objLocale.tooltip)
 
 -------------------------------------------------------------------------------
--- Cumulative DoT Tracker native options (Darksolis v5.4.86)
+-- Cumulative DoT Tracker native options (Darksolis v5.4.88)
 -------------------------------------------------------------------------------
 -- Register the tab before creating any complex controls.  Older clients can
 -- abort addon loading when dropdown widgets are constructed too early.
@@ -3411,7 +3411,7 @@ local function BuildCumulativeDotTab()
 local controls={}
 local scroll=CreateFrame("ScrollFrame",nil,frame,"UIPanelScrollFrameTemplate")
 scroll:SetPoint("TOPLEFT",0,0); scroll:SetPoint("BOTTOMRIGHT",-24,0)
-local content=CreateFrame("Frame",nil,scroll); content:SetWidth(360); content:SetHeight(1180)
+local content=CreateFrame("Frame",nil,scroll); content:SetWidth(360); content:SetHeight(1420)
 scroll:SetScrollChild(content)
 local function DB() return API.GetDB and API.GetDB() end
 local function RefreshTracker() if API.Refresh then API.Refresh() end end
@@ -3504,30 +3504,62 @@ local maxSpells=Stepper("Max spells shown",180,-786,"maxSpellLabels",1,10,1,"")
 local maxTargets=Stepper("Max target rows",0,-842,"maxTargets",1,20,1,"")
 local fade=Stepper("Expiration linger",180,-842,"applicationFade",0,5,.25," sec")
 
-Divider(-906,"Position & Cleanup")
-local xoff=Stepper("Horizontal offset",0,-936,"xOffset",-500,500,5," px")
-local yoff=Stepper("Vertical offset",180,-936,"yOffset",-500,500,5," px")
-local timeout=Stepper("Death fallback",0,-992,"deathTimeout",5,60,1," sec")
+Divider(-906,"Stack Icon")
+Check("Show one stack icon",0,-936,"stackIconEnabled","Displays one representative icon beside the cumulative total, independent of spell names and dynamic DoT icons.")
+Check("Pulse on every DoT tick",180,-936,"pulseOnTick","Applies MSBT's sticky pow pulse whenever the cumulative total increases.")
+local iconSide=Drop("Icon position",0,-974,165,"stackIconPosition",{{"left","Left of total"},{"right","Right of total"}})
+local iconSize=Stepper("Icon size",180,-974,"stackIconSize",12,64,1," px")
+Label(content,"Icon spell ID, spell name, or texture path",0,-1030,"GameFontNormalSmall",345)
+local iconEdit=CreateFrame("EditBox",nil,content,"InputBoxTemplate"); iconEdit:SetPoint("TOPLEFT",content,"TOPLEFT",5,-1052); iconEdit:SetWidth(240); iconEdit:SetHeight(22); iconEdit:SetAutoFocus(false)
+Button("Apply",250,-1050,50,function() local d=DB(); local value=iconEdit:GetText(); if d and value and value~="" then d.stackIconSource=value; RefreshTracker(); frame:Refresh() end end)
+Button("Hemorrhage",0,-1080,105,function() local d=DB(); if d then d.stackIconSource="Interface\\Icons\\Ability_Rogue_Hemorrhage"; iconEdit:SetText(d.stackIconSource); RefreshTracker(); frame:Refresh() end end)
+Label(content,"Use a custom icon even when Spell information is set to Damage only.",112,-1082,"GameFontHighlightSmall",235)
 
-Divider(-1052,"Spell Whitelist")
-Label(content,"Disable Track All, then add a spell ID or exact spell name.",0,-1080,"GameFontHighlightSmall",345)
-local edit=CreateFrame("EditBox",nil,content,"InputBoxTemplate"); edit:SetPoint("TOPLEFT",content,"TOPLEFT",5,-1104); edit:SetWidth(180); edit:SetHeight(22); edit:SetAutoFocus(false)
-Button("Add",190,-1102,50,function() API.AddWhitelist(edit:GetText()); edit:SetText(""); frame:Refresh() end)
-Button("Remove",244,-1102,58,function() API.RemoveWhitelist(edit:GetText()); edit:SetText(""); frame:Refresh() end)
-Button("Clear",306,-1102,48,function() API.ClearWhitelist(); edit:SetText(""); frame:Refresh() end)
-local status=Label(content,"",0,-1132,"GameFontHighlightSmall",100)
-Button("Test display",0,-1155,95,function() API.Test() end)
-Button("Reset totals",102,-1155,95,function() API.Reset() end)
-Button("Restore defaults",204,-1155,110,function() API.ResetDefaults(); frame:Refresh() end)
+Divider(-1130,"Position & Cleanup")
+local xoff=Stepper("Horizontal offset",0,-1160,"xOffset",-500,500,5," px")
+local yoff=Stepper("Vertical offset",180,-1160,"yOffset",-500,500,5," px")
+local timeout=Stepper("Death fallback",0,-1216,"deathTimeout",5,60,1," sec")
+
+Divider(-1276,"Spell Whitelist")
+Label(content,"Disable Track All, then add a spell ID or exact spell name.",0,-1304,"GameFontHighlightSmall",345)
+local edit=CreateFrame("EditBox",nil,content,"InputBoxTemplate"); edit:SetPoint("TOPLEFT",content,"TOPLEFT",5,-1328); edit:SetWidth(180); edit:SetHeight(22); edit:SetAutoFocus(false)
+Button("Add",190,-1326,50,function() API.AddWhitelist(edit:GetText()); edit:SetText(""); frame:Refresh() end)
+Button("Remove",244,-1326,58,function() API.RemoveWhitelist(edit:GetText()); edit:SetText(""); frame:Refresh() end)
+Button("Clear",306,-1326,48,function() API.ClearWhitelist(); edit:SetText(""); frame:Refresh() end)
+local status=Label(content,"",0,-1356,"GameFontHighlightSmall",100)
+Button("Test display",0,-1379,95,function() API.Test() end)
+Button("Reset totals",102,-1379,95,function() API.Reset() end)
+Button("Restore defaults",204,-1379,110,function() API.ResetDefaults(); frame:Refresh() end)
 
 local function PreviewText(d)
  local spells=""
- if d.spellLabelMode=="names" then spells="Corruption • Immolate  "
- elseif d.spellLabelMode=="breakdown" then spells="Corruption 73.5k • Immolate 55.0k  " end
+ local iconSize=math.max(12,(d.fontSize or 26)-5)
+ if d.showSpellIcons then
+  spells="|TInterface\\Icons\\Spell_Shadow_AbominationExplosion:"..iconSize..":"..iconSize.."|t"
+  if d.spellLabelMode~="none" then spells=spells.." " end
+ end
+ if d.spellLabelMode=="names" then
+  spells=spells.."Corruption"
+  if d.showSpellIcons then spells=spells.."  |TInterface\\Icons\\Spell_Fire_Immolation:"..iconSize..":"..iconSize.."|t " else spells=spells.." • " end
+  spells=spells.."Immolate  "
+ elseif d.spellLabelMode=="breakdown" then
+  spells=spells.."Corruption 73.5k"
+  if d.showSpellIcons then spells=spells.."  |TInterface\\Icons\\Spell_Fire_Immolation:"..iconSize..":"..iconSize.."|t " else spells=spells.." • " end
+  spells=spells.."Immolate 55.0k  "
+ elseif d.showSpellIcons then
+  spells=spells.." |TInterface\\Icons\\Spell_Fire_Immolation:"..iconSize..":"..iconSize.."|t  "
+ end
  local target=d.showTargetName and "Training Dummy  " or ""
  local amount=d.compactNumbers and "128.5k" or "128,450"
  if d.showDamageLabel then amount=amount.." damage" end
- return target..spells..amount
+ local body=target..spells..amount
+ if d.stackIconEnabled then
+  local texture=API.GetStackIconTexture and API.GetStackIconTexture() or "Interface\\Icons\\Ability_Rogue_Hemorrhage"
+  local size=tonumber(d.stackIconSize) or 30
+  local icon="|T"..texture..":"..size..":"..size.."|t"
+  if d.stackIconPosition=="right" then body=body.."  "..icon else body=icon.."  "..body end
+ end
+ return body
 end
 function frame:Refresh()
  local d=DB(); if not d then return end
@@ -3538,6 +3570,7 @@ function frame:Refresh()
  end
  fontDrop:SetSelectedID(d.fontName)
  if d.inheritFont then fontDrop.selectedFontString:SetText("Inherited from scroll area") end
+ if iconEdit and not iconEdit:HasFocus() then iconEdit:SetText(d.stackIconSource or "") end
  local path=API.GetFontPath and API.GetFontPath() or "Fonts\\FRIZQT__.TTF"
  preview:SetFont(path,d.fontSize or 26,d.outline or "THICKOUTLINE")
  preview:SetTextColor((d.colorR or 255)/255,(d.colorG or 190)/255,(d.colorB or 35)/255,1)

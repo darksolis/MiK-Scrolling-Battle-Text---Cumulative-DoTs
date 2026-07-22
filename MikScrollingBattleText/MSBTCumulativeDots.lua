@@ -1,5 +1,5 @@
 -------------------------------------------------------------------------------
--- MSBT Cumulative DoT Tracker - Darksolis Premium Edition v5.4.85
+-- MSBT Cumulative DoT Tracker - Darksolis Premium Edition v5.4.88
 -- Persistent cumulative periodic damage rendered at an MSBT scroll area.
 -------------------------------------------------------------------------------
 local addonName = "MikScrollingBattleText"
@@ -11,6 +11,8 @@ local defaults = {
  inheritFont=true, fontName=nil, fontSize=26, outline="THICKOUTLINE",
  alignment="CENTER", spacing=6, maxTargets=8, maxSpellLabels=4,
  showTargetName=false, spellLabelMode="none", showSpellIcons=false,
+ stackIconEnabled=false, stackIconSource="Interface\\Icons\\Ability_Rogue_Hemorrhage",
+ stackIconPosition="left", stackIconSize=30, pulseOnTick=true,
  activeSpellsOnly=false, compactNumbers=true, showDamageLabel=false,
  colorR=255, colorG=190, colorB=35, xOffset=0, yOffset=0,
  sortMode="recent", applicationFade=1.25, deathTimeout=15,
@@ -47,6 +49,28 @@ local function Allowed(id,name)
  return (id and db.whitelist[id]) or (name and db.whitelist[lower(name)])
 end
 local function Mine(guid) return guid==playerGUID or (db.includePet and petGUID and guid==petGUID) end
+
+local function ResolveSpellTexture(id,name)
+ local texture
+ if GetSpellTexture then
+  if id then texture=GetSpellTexture(id) end
+  if not texture and name then texture=GetSpellTexture(name) end
+ end
+ if not texture and GetSpellInfo then
+  if id then texture=select(3,GetSpellInfo(id)) end
+  if not texture and name then texture=select(3,GetSpellInfo(name)) end
+ end
+ return texture
+end
+local function ResolveStackIcon()
+ local source=db and db.stackIconSource
+ if not source or source=="" then return "Interface\\Icons\\Ability_Rogue_Hemorrhage" end
+ local id=tonumber(source)
+ local texture=ResolveSpellTexture(id,id and nil or source)
+ if texture then return texture end
+ if source:find("\\") or source:find("/") then return source end
+ return "Interface\\Icons\\"..source
+end
 
 local function ScrollSettings()
  local areas = MikSBT and MikSBT.Animations and MikSBT.Animations.scrollAreas
@@ -93,22 +117,43 @@ local function Sorted()
  return list
 end
 local function SpellParts(r)
- if db.spellLabelMode=="none" then return nil end
+ -- Icons are independent flair: they may be shown even when the text mode is
+ -- "Damage only".  Only return nothing when both labels and icons are disabled.
+ if db.spellLabelMode=="none" and not db.showSpellIcons then return nil end
  local list={}
  for id,s in pairs(r.spells) do
   if s.total>0 and (not db.activeSpellsOnly or r.active[id]) then list[#list+1]={id=id,name=s.name,total=s.total,icon=s.icon} end
  end
  table.sort(list,function(a,b) return a.total>b.total end)
  local parts={}
+ local iconSize=math.max(12,(db.fontSize or 26)-5)
  for i=1,math.min(#list,db.maxSpellLabels or 4) do
   local s=list[i]; local text=""
-  if db.showSpellIcons and s.icon then text=text.."|T"..s.icon..":"..math.max(12,(db.fontSize or 26)-5)..":"..math.max(12,(db.fontSize or 26)-5).."|t " end
-  text=text..(s.name or tostring(s.id))
-  if db.spellLabelMode=="breakdown" then text=text.." "..FormatNumber(s.total) end
-  parts[#parts+1]=text
+  if db.showSpellIcons and s.icon then text=text.."|T"..s.icon..":"..iconSize..":"..iconSize.."|t" end
+  if db.spellLabelMode~="none" then
+   if text~="" then text=text.." " end
+   text=text..(s.name or tostring(s.id))
+   if db.spellLabelMode=="breakdown" then text=text.." "..FormatNumber(s.total) end
+  end
+  if text~="" then parts[#parts+1]=text end
  end
- if #list>(db.maxSpellLabels or 4) then parts[#parts+1]="+"..(#list-(db.maxSpellLabels or 4)) end
- return #parts>0 and table.concat(parts," |cffaaaaaa•|r ") or nil
+ if #list>(db.maxSpellLabels or 4) and db.spellLabelMode~="none" then parts[#parts+1]="+"..(#list-(db.maxSpellLabels or 4)) end
+ -- Icons sit cleanly beside each other; labeled spells retain the separator.
+ local separator=db.spellLabelMode=="none" and " " or " |cffaaaaaa•|r "
+ return #parts>0 and table.concat(parts,separator) or nil
+end
+
+local function CombinedSpellRecord(list)
+ local combined={spells={},active={}}
+ for _,r in ipairs(list) do
+  for id,s in pairs(r.spells) do
+   local c=combined.spells[id]
+   if not c then c={name=s.name,total=0,icon=s.icon}; combined.spells[id]=c end
+   c.total=c.total+(s.total or 0)
+   if r.active[id] then combined.active[id]=true end
+  end
+ end
+ return combined
 end
 local function MainText(r,total,targetCount)
  local parts={}
@@ -121,8 +166,15 @@ local function MainText(r,total,targetCount)
  end
  local dmg=FormatNumber(total)
  if db.showDamageLabel then dmg=dmg.." damage" end
- parts[#parts+1]=dmg
- return table.concat(parts,"  ")
+ local body=table.concat(parts,"  ")
+ if body~="" then body=body.."  " end
+ body=body..dmg
+ if db.stackIconEnabled then
+  local size=tonumber(db.stackIconSize) or math.max(18,(db.fontSize or 26))
+  local icon="|T"..ResolveStackIcon()..":"..size..":"..size.."|t"
+  if db.stackIconPosition=="right" then body=body.."  "..icon else body=icon.."  "..body end
+ end
+ return body
 end
 local function ApplyStyle(f,index)
  local x,y=AnchorPoint(index)
@@ -142,7 +194,8 @@ function tracker:RefreshDisplay()
   local total,count,crit=0,0,false
   for _,r in ipairs(list) do total=total+r.total; count=count+1; if r.lastCrit and GetTime()-r.lastCrit<.3 then crit=true end end
   if total>0 then
-   local f=EnsureDisplay(1); ApplyStyle(f,1); f.text:SetText(MainText(nil,total,count)); if crit then Pulse(f) end; f:Show()
+   local f=EnsureDisplay(1); ApplyStyle(f,1); local combined=CombinedSpellRecord(list)
+   f.text:SetText(MainText(combined,total,count)); if crit then Pulse(f) end; f:Show()
   end
  else
   for i=1,math.min(#list,db.maxTargets or 8) do
@@ -183,10 +236,10 @@ local function Damage(src,dst,dstName,id,name,amount,critical)
  amount=tonumber(amount); if not amount or amount<=0 then return end
  local r=Record(dst,dstName); if not r then return end
  local s=r.spells[id]
- if not s then s={name=name or tostring(id),total=0,icon=GetSpellTexture and GetSpellTexture(id)}; r.spells[id]=s end
- s.name=name or s.name; s.icon=s.icon or (GetSpellTexture and GetSpellTexture(id)); s.total=s.total+amount
+ if not s then s={name=name or tostring(id),total=0,icon=ResolveSpellTexture(id,name)}; r.spells[id]=s end
+ s.name=name or s.name; s.icon=s.icon or ResolveSpellTexture(id,name); s.total=s.total+amount
  r.total=r.total+amount; r.lastDamage=GetTime(); r.removeAt=nil
- if critical then r.lastCrit=GetTime() end
+ if critical or db.pulseOnTick then r.lastCrit=GetTime() end
  tracker:RefreshDisplay()
 end
 local function Remove(guid) if targets[guid] then targets[guid]=nil; tracker:RefreshDisplay() end end
@@ -232,6 +285,7 @@ end
 MikSBT = MikSBT or {}
 MikSBT.CumulativeDots = {
  GetDB=function() return db end, GetDefaults=function() return defaults end, GetFontPath=function() return FontPath() end,
+ GetStackIconTexture=function() return ResolveStackIcon() end,
  Refresh=function() tracker:RefreshDisplay() end, Reset=ResetAll, Test=Test, ResetDefaults=ResetDefaults,
  AddWhitelist=function(value) if db and value and value~="" then local id=tonumber(value); db.whitelist[id or lower(value)]=true end end,
  RemoveWhitelist=function(value) if db and value and value~="" then local id=tonumber(value); db.whitelist[id or lower(value)]=nil end end,
